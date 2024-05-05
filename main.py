@@ -59,36 +59,12 @@ import logging
 if os.name == "nt":
     logging.getLogger("xformers").addFilter(lambda record: 'A matching Triton is not available' not in record.getMessage())
 
-if __name__ == "__main__":
-    if args.cuda_device is not None:
-        os.environ['CUDA_VISIBLE_DEVICES'] = str(args.cuda_device)
-        logging.info("Set cuda device to: {}".format(args.cuda_device))
-
-    if args.deterministic:
-        if 'CUBLAS_WORKSPACE_CONFIG' not in os.environ:
-            os.environ['CUBLAS_WORKSPACE_CONFIG'] = ":4096:8"
-
-    import cuda_malloc
-
 import comfy.utils
 import yaml
-
 import execution
 import server
 from server import BinaryEventTypes
 from nodes import init_custom_nodes
-import comfy.model_management
-
-def cuda_malloc_warning():
-    device = comfy.model_management.get_torch_device()
-    device_name = comfy.model_management.get_torch_device_name(device)
-    cuda_malloc_warning = False
-    if "cudaMallocAsync" in device_name:
-        for b in cuda_malloc.blacklist:
-            if b in device_name:
-                cuda_malloc_warning = True
-        if cuda_malloc_warning:
-            logging.warning("\nWARNING: this card most likely does not support cuda-malloc, if you get \"CUDA error\" please run ComfyUI with: --disable-cuda-malloc\n")
 
 def prompt_worker(q, server):
     e = execution.PromptExecutor(server)
@@ -126,11 +102,6 @@ def prompt_worker(q, server):
         flags = q.get_flags()
         free_memory = flags.get("free_memory", False)
 
-        if flags.get("unload_models", free_memory):
-            comfy.model_management.unload_all_models()
-            need_gc = True
-            last_gc_collect = 0
-
         if free_memory:
             e.reset()
             need_gc = True
@@ -139,9 +110,7 @@ def prompt_worker(q, server):
         if need_gc:
             current_time = time.perf_counter()
             if (current_time - last_gc_collect) > gc_collect_interval:
-                comfy.model_management.cleanup_models()
                 gc.collect()
-                comfy.model_management.soft_empty_cache()
                 last_gc_collect = current_time
                 need_gc = False
 
@@ -151,7 +120,6 @@ async def run(server, address='', port=8188, verbose=True, call_on_start=None):
 
 def hijack_progress(server):
     def hook(value, total, preview_image):
-        comfy.model_management.throw_exception_if_processing_interrupted()
         progress = {"value": value, "max": total, "prompt_id": server.last_prompt_id, "node": server.last_node_id}
 
         server.send_sync("progress", progress, server.client_id)
@@ -215,8 +183,6 @@ if __name__ == "__main__":
             load_extra_path_config(config_path)
 
     init_custom_nodes()
-
-    cuda_malloc_warning()
 
     server.add_routes()
     hijack_progress(server)
