@@ -14,6 +14,8 @@ export default defineConfig({
         externalGlobals({
           vue: 'Vue',
           vuetify: 'Vuetify',
+          'vuetify/components': 'Vuetify.components',
+          'vuetify/directives': 'Vuetify.directives'
         }),
       ],
     },
