@@ -5,9 +5,23 @@ const COLORS = {
   JSON: '#F44336',
   DIR: '#673AB7',
 }
+
 // 节点颜色
 app.registerExtension({
   name: 'WorkUtils.Colors',
+  async init(app) {
+    console.log('[WorkUtils] 导入脚本、样式')
+    const script = document.createElement('script')
+    script.type = 'text/javascript'
+    script.src = '/extensions/work_utils/index.js'
+    document.head.appendChild(script)
+
+    const link = document.createElement('link')
+    link.type = "text/css";
+    link.rel = "stylesheet";
+    link.href = '/extensions/work_utils/index.css'
+    document.head.appendChild(link)
+  },
   async setup(app) {
     console.log('[WorkUtils] 设置颜色')
     Object.assign(app.canvas.default_connection_color_byType, COLORS)
@@ -43,75 +57,28 @@ app.registerExtension({
       return
     }
     const root = document.createElement('div')
+    root.id = 'WorkUtils'
     let count = 0
 
     nodeType.prototype.onAdded = function (graph) {
-      root.innerHTML = `
-        <table border="1">
-        <tr>
-          <td>100</td>
-          <td>200</td>
-          <td>300</td>
-          <td>100</td>
-          <td>200</td>
-          <td>300</td>
-          <td>100</td>
-          <td>200</td>
-          <td>300</td>
-        </tr>
-        <tr>
-          <td>400</td>
-          <td>500</td>
-          <td>600</td>
-          <td>100</td>
-          <td>200</td>
-          <td>300</td>
-          <td>100</td>
-          <td>200</td>
-          <td>300</td>
-        </tr>
-        </table>`
       const widget = this.addDOMWidget('$$preview_table', 'textoutput', root, {
         hideOnZoom: false,
         // 目前好像只能定义最小高度，宽度搞不了
-        getMinHeight: () => 100, 
+        getMinHeight: () => 100,
       })
       widget.serializeValue = () => undefined
       // 设置初始宽高
-      this.setSize([350, 200]);
-      console.log('render==========', this, widget)
+      this.setSize([420, 300])
+      globalThis.createTable('#WorkUtils')
+      console.log('render123==========', this, widget)
     }
-    
-    const onExecutedOriginal = nodeType.prototype.onExecuted;
+
+    const onExecutedOriginal = nodeType.prototype.onExecuted
     nodeType.prototype.onExecuted = function (data) {
-      onExecutedOriginal?.apply(this, arguments);
+      onExecutedOriginal?.apply(this, arguments)
       console.log('data', data)
       console.log('node', this)
-      root.innerHTML = `
-        <table border="1">
-        <tr>
-          <td>${count++}</td>
-          <td>200</td>
-          <td>300</td>
-          <td>100</td>
-          <td>200</td>
-          <td>300</td>
-          <td>100</td>
-          <td>200</td>
-          <td>300</td>
-        </tr>
-        <tr>
-          <td>400</td>
-          <td>500</td>
-          <td>600</td>
-          <td>100</td>
-          <td>200</td>
-          <td>300</td>
-          <td>100</td>
-          <td>200</td>
-          <td>300</td>
-        </tr>
-        </table>`
+      // todo: 更新ui界面
     }
   },
 })
