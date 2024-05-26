@@ -6,6 +6,7 @@
 
 // Plugins
 import vuetify from './vuetify'
+// import monaco from './monaco'
 
 export function registerPlugins (app) {
   app.use(vuetify)

@@ -4,6 +4,7 @@ import Vue from '@vitejs/plugin-vue'
 import Vuetify, { transformAssetUrls } from 'vite-plugin-vuetify'
 import ViteFonts from 'unplugin-fonts/vite'
 
+
 // Utilities
 import { defineConfig } from 'vite'
 import { fileURLToPath, URL } from 'node:url'
@@ -48,9 +49,8 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        chunkFileNames: '[name].js',
         entryFileNames: '[name].js',
-        assetFileNames: '[name].[ext]',
+        assetFileNames: 'assets/[name].[ext]',
       },
     },
   },

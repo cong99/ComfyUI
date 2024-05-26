@@ -25,28 +25,130 @@ class Logger {
   }
 }
 
+class Utils {
+  static genID() {
+    return Math.random().toString(36).slice(2)
+  }
+
+  static getJson(str) {
+    let data = {}
+    try {
+      data = JSON.parse(str)
+    } catch (error) {
+      logger.error('parse json failed', str)
+    }
+    return data
+  }
+}
+
+const NodeHelper = {
+  getPreviewId(nodeType) {
+    return nodeType?.widgets?.[0]?.name
+  },
+
+  Preview: class {
+    constructor(nodeType, id = Utils.genID()) {
+      const divEle = document.createElement('div')
+      divEle.style = 'height: 300px; width: 300px;'
+      divEle.id = id
+      const name = id
+      const val = id
+      const widget = nodeType.addDOMWidget(name, val, divEle, {
+        hideOnZoom: false,
+        getMinHeight: () => 100,
+      })
+      widget.serializeValue = () => undefined
+
+      this._widget = widget
+      this._id = id
+      this._$el = divEle
+    }
+
+    get widget() {
+      return this._widget
+    }
+
+    get id() {
+      return this._id
+    }
+
+    get $el() {
+      return this._$el
+    }
+  },
+}
+
+function importMonaco() {
+  const monacoCDN = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.49.0'
+
+  const script1 = document.createElement('script')
+  script1.type = 'text/javascript'
+  script1.src = `${monacoCDN}/min/vs/loader.js`
+  document.head.appendChild(script1)
+
+  // const script = document.createElement('script')
+  // script.type = 'text/javascript'
+  // script.src = `${monacoCDN}/min/vs/editor/editor.main.min.js`
+  // document.head.appendChild(script)
+
+  // const link = document.createElement('link')
+  // link.type = 'text/css'
+  // link.rel = 'stylesheet'
+  // link.href = `${monacoCDN}/dev/vs/editor/editor.main.min.css`
+  // document.head.appendChild(link)
+
+  // 详见 https://jsfiddle.net/developit/bwgkr6uq/
+
+  globalThis.require.config({ paths: { 'vs': `${monacoCDN}/min/vs` }});
+
+  globalThis.MonacoEnvironment = {
+    getWorkerUrl: function (workerId, label) {
+      return `data:text/javascript;charset=utf-8,${encodeURIComponent(`
+        self.MonacoEnvironment = {
+          baseUrl: '${monacoCDN}/min/'
+        };
+        importScripts('${monacoCDN}/min/vs/base/worker/workerMain.js');`)}`
+    },
+  }
+  require(["vs/editor/editor.main"], () => {
+    console.log('123', monaco)
+  })
+}
+
 const logger = new Logger('WorkUtils')
 
-// 节点颜色
+// 通用
 app.registerExtension({
-  name: 'WorkUtils.Colors',
+  name: 'WorkUtils.Common',
   async init(app) {
     logger.info('导入脚本、样式')
     const script = document.createElement('script')
-    script.type = 'text/javascript'
+    script.type = 'module'
     script.src = '/extensions/work_utils/index.js'
     document.head.appendChild(script)
 
     const link = document.createElement('link')
     link.type = 'text/css'
     link.rel = 'stylesheet'
-    link.href = '/extensions/work_utils/index.css'
+    link.href = '/extensions/work_utils/assets/index.css'
     document.head.appendChild(link)
+
+    logger.info('导入monaco')
+    // importMonaco()
   },
   async setup(app) {
     logger.info('设置颜色')
     Object.assign(app.canvas.default_connection_color_byType, COLORS)
     Object.assign(LGraphCanvas.link_type_colors, COLORS)
+  },
+  async beforeRegisterNodeDef(nodeType, nodeData, app) {
+    if (!nodeData.category?.startsWith('work_utils/')) {
+      return
+    }
+    nodeType.prototype.onAdded = function (graph) {
+      // 默认宽高
+      this.setSize([300, 100])
+    }
   },
   async getCustomWidgets(app) {
     logger.info('加载自定义Widget')
@@ -158,8 +260,7 @@ app.registerExtension({
             if (accept === '*' || accept.split(',').some((a) => file.type.startsWith(a))) {
               uploadFile(file, !handled) // Dont await these, any order is fine, only update on first one
               handled = true
-            }
-            else {
+            } else {
               logger.info(`require ${accept}, but got ${file.type}`)
             }
           }
@@ -181,7 +282,7 @@ app.registerExtension({
   },
 })
 
-// 加载文件
+// load file
 app.registerExtension({
   name: 'WorkUtils.LoadFile',
   async beforeRegisterNodeDef(nodeType, nodeData, app) {
@@ -211,39 +312,58 @@ app.registerExtension({
         nodeData.input.optional[`${key}_upload`] = ['FILEUPLOAD', { widget: key, accept: attrs.accept }]
       }
     })
+  },
+})
 
+// table preview
+app.registerExtension({
+  name: 'WorkUtils.TablePreview',
+  async beforeRegisterNodeDef(nodeType, nodeData, app) {
+    if (nodeData.name !== 'TablePreview') {
+      return
+    }
     nodeType.prototype.onAdded = function (graph) {
-      this.setSize([300, 100])
+      const preview = new NodeHelper.Preview(this)
+      this.setSize([420, 300])
+      globalThis.createTable(`#${preview.id}`)
+      logger.debug('render', this, preview.widget)
+    }
+
+    const onEx = nodeType.prototype.onExecuted
+    nodeType.prototype.onExecuted = function (data) {
+      onEx?.apply(this, arguments)
+      logger.info('data', data)
+      logger.info('node', this)
+      // todo: 更新ui界面
     }
   },
 })
 
+// json preview
 app.registerExtension({
-  name: 'WorkUtils.TextOutput',
+  name: 'WorkUtils.JsonPreview',
   async beforeRegisterNodeDef(nodeType, nodeData, app) {
-    if (nodeData.name !== 'TextOutput') {
+    if (nodeData.name !== 'JsonPreview') {
       return
     }
-    const root = document.createElement('div')
-    root.id = 'WorkUtils'
     nodeType.prototype.onAdded = function (graph) {
-      const widget = this.addDOMWidget('$$preview_table', 'textoutput', root, {
-        hideOnZoom: false,
-        // 目前好像只能定义最小高度，宽度搞不了
-        getMinHeight: () => 100,
-      })
-      widget.serializeValue = () => undefined
-      // 设置初始宽高
+      const preview = new NodeHelper.Preview(this)
       this.setSize([420, 300])
-      globalThis.createTable(`#${root.id}`)
-      logger.debug('render', this, widget)
+      logger.debug('json_preview, render', this, preview.widget)
+      // const editor = monaco.editor.create(preview.$el, {
+      //   value: '{\n\t"dependencies": {\n\t\t\n\t}\n}\n',
+      //   language: 'json',
+      //   theme: 'vs-dark',
+      // })
     }
-
-    const onExecutedOriginal = nodeType.prototype.onExecuted
-    nodeType.prototype.onExecuted = function (data) {
-      onExecutedOriginal?.apply(this, arguments)
-      logger.info('data', data)
-      logger.info('node', this)
+    const onEx = nodeType.prototype.onExecuted
+    nodeType.prototype.onExecuted = function (result) {
+      onEx?.apply(this, arguments)
+      const str = result?.data?.[0]
+      const data = Utils.getJson(str)
+      const id = NodeHelper.getPreviewId(this)
+      logger.info('json_preview id', id)
+      logger.info('json_preview data', data)
       // todo: 更新ui界面
     }
   },
