@@ -20,6 +20,10 @@ class Logger {
     console.log(`[${this.name}] [debug]`, ...msgs)
   }
 
+  warn(...msgs) {
+    console.log(`[${this.name}] [warn]`, ...msgs)
+  }
+
   error(...msgs) {
     console.log(`[${this.name}] [error]`, ...msgs)
   }
@@ -39,21 +43,38 @@ class Utils {
     }
     return data
   }
+
+  static importJS({ src, type = 'text/javascript' }, callback) {
+    const script = document.createElement('script')
+    script.type = type
+    script.src = src
+    script.onload = () => {
+      callback?.()
+    }
+    document.head.appendChild(script)
+  }
+
+  static importCSS(href) {
+    const link = document.createElement('link')
+    link.type = 'text/css'
+    link.rel = 'stylesheet'
+    link.href = href
+    document.head.appendChild(link)
+  }
+
+  static inlineStyle(styles) {
+    const style = document.createElement('style')
+    style.innerText = styles
+    document.head.append(style)
+  }
 }
 
 const NodeHelper = {
-  getPreviewId(nodeType) {
-    return nodeType?.widgets?.[0]?.name
-  },
-
   Preview: class {
     constructor(nodeType, id = Utils.genID()) {
       const divEle = document.createElement('div')
-      divEle.style = 'height: 300px; width: 300px;'
       divEle.id = id
-      const name = id
-      const val = id
-      const widget = nodeType.addDOMWidget(name, val, divEle, {
+      const widget = nodeType.addDOMWidget(id, id, divEle, {
         hideOnZoom: false,
         getMinHeight: () => 100,
       })
@@ -76,65 +97,208 @@ const NodeHelper = {
       return this._$el
     }
   },
+
+  SplitPreview: class {
+    constructor(nodeType, { idLeft = Utils.genID(), idRight = Utils.genID(), ratio = [0.5, 0.5] } = {}) {
+      if (!ratio[1]) {
+        ratio[1] = 1 - ratio[0]
+      }
+      Utils.inlineStyle(this.getStyle(ratio))
+
+      const divWrapper = document.createElement('div')
+      divWrapper.className = 'split-preview'
+      const divLeft = document.createElement('div')
+      divLeft.id = idLeft
+      divLeft.className = 'left'
+      const divRight = document.createElement('div')
+      divRight.id = idRight
+      divRight.className = 'right'
+      divWrapper.appendChild(divLeft)
+      divWrapper.appendChild(divRight)
+
+      const widget = nodeType.addDOMWidget(idLeft, idLeft, divWrapper, {
+        hideOnZoom: false,
+        getMinHeight: () => 250,
+      })
+      widget.serializeValue = () => undefined
+
+      this._widget = widget
+      this._id = idLeft
+      this._idLeft = idLeft
+      this._idRight = idRight
+      this._$el = divWrapper
+      this._$elLeft = divLeft
+      this._$elRight = divRight
+    }
+
+    getStyle(ratio) {
+      return `
+        .split-preview {
+          display: flex;
+        }
+        .split-preview .left {
+          width: ${ratio[0] * 100}%;
+        }
+        .split-preview .right {
+          width: ${ratio[1] * 100}%
+        }
+      `
+    }
+
+    get widget() {
+      return this._widget
+    }
+
+    get id() {
+      return this._id
+    }
+
+    get idLeft() {
+      return this._idLeft
+    }
+
+    get idRight() {
+      return this._idRight
+    }
+
+    get $el() {
+      return this._$el
+    }
+
+    get $elLeft() {
+      return this._$elLeft
+    }
+
+    get $elRight() {
+      return this._$elRight
+    }
+  },
 }
 
-function importMonaco() {
-  const monacoCDN = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.49.0'
+class MonacoHelper {
+  load() {
+    const monacoCDN = 'https://unpkg.com/monaco-editor@0.49.0'
+    this._ready = new Promise((resolve, reject) => {
+      Utils.importJS({ src: `${monacoCDN}/min/vs/loader.js` }, () => {
+        require.config({ paths: { vs: `${monacoCDN}/min/vs` } })
+        require(['vs/editor/editor.main'], () => {
+          this.init()
+          resolve()
+        })
+      })
+    })
 
-  const script1 = document.createElement('script')
-  script1.type = 'text/javascript'
-  script1.src = `${monacoCDN}/min/vs/loader.js`
-  document.head.appendChild(script1)
-
-  // const script = document.createElement('script')
-  // script.type = 'text/javascript'
-  // script.src = `${monacoCDN}/min/vs/editor/editor.main.min.js`
-  // document.head.appendChild(script)
-
-  // const link = document.createElement('link')
-  // link.type = 'text/css'
-  // link.rel = 'stylesheet'
-  // link.href = `${monacoCDN}/dev/vs/editor/editor.main.min.css`
-  // document.head.appendChild(link)
-
-  // 详见 https://jsfiddle.net/developit/bwgkr6uq/
-
-  globalThis.require.config({ paths: { 'vs': `${monacoCDN}/min/vs` }});
-
-  globalThis.MonacoEnvironment = {
-    getWorkerUrl: function (workerId, label) {
-      return `data:text/javascript;charset=utf-8,${encodeURIComponent(`
-        self.MonacoEnvironment = {
-          baseUrl: '${monacoCDN}/min/'
-        };
-        importScripts('${monacoCDN}/min/vs/base/worker/workerMain.js');`)}`
-    },
+    globalThis.MonacoEnvironment = {
+      getWorkerUrl: function (workerId, label) {
+        return `data:text/javascript;charset=utf-8,${encodeURIComponent(`
+          self.MonacoEnvironment = {
+            baseUrl: '${monacoCDN}/min/'
+          };
+          importScripts('${monacoCDN}/min/vs/base/worker/workerMain.js');`)}`
+      },
+    }
   }
-  require(["vs/editor/editor.main"], () => {
-    console.log('123', monaco)
-  })
+
+  init() {
+    this.registerLogLang()
+    this.setTheme()
+  }
+
+  setTheme() {
+    const theme = 'workutils-dark'
+
+    monaco.editor.defineTheme(theme, {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [
+        { token: 'custom-info', foreground: 'BDBDBD' },
+        { token: 'custom-error', foreground: 'EF9A9A', fontStyle: 'bold' },
+        { token: 'custom-date', foreground: 'A5D6A7' },
+      ],
+      colors: {},
+    })
+
+    monaco.editor.setTheme(theme)
+  }
+
+  registerLogLang() {
+    const lang = 'workutils-text'
+
+    monaco.languages.register({ id: lang })
+    monaco.languages.setMonarchTokensProvider(lang, {
+      tokenizer: {
+        root: [
+          [/\[error.*/, 'custom-error'],
+          [/\[info.*/, 'custom-info'],
+          [/\[[a-zA-Z 0-9:]+\]/, 'custom-date'],
+        ],
+      },
+    })
+  }
+
+  addFilesChangeCommand(editor, files) {
+    const lang = 'workutils-text'
+    const id = 'file_change'
+
+    const str = Object.values(files)[0]
+    editor?.getModel()?.setValue(str)
+
+    if (this._addedFilesChangeCommandDisPose) {
+      this._addedFilesChangeCommandDisPose.forEach((item) => item.dispose())
+    }
+    this._addedFilesChangeCommandDisPose = [
+      monaco.languages.registerCodeLensProvider(lang, {
+        provideCodeLenses: function (model, token) {
+          return {
+            lenses: Object.keys(files).map((filename) => ({
+              range: {
+                startLineNumber: 1,
+                startColumn: 1,
+                endLineNumber: 2,
+                endColumn: 1,
+              },
+              id,
+              command: {
+                id,
+                title: filename,
+                arguments: [files[filename]],
+              },
+            })),
+            dispose: () => {},
+          }
+        },
+        resolveCodeLens: function (model, codeLens, token) {
+          return codeLens
+        },
+      }),
+      monaco.editor.addCommand({
+        id,
+        run: function (_, content) {
+          // 更新编辑的文本内容
+          editor.getModel().setValue(content)
+        },
+      }),
+    ]
+  }
+
+  get ready() {
+    return this._ready
+  }
 }
 
 const logger = new Logger('WorkUtils')
+const _m = new MonacoHelper()
 
 // 通用
 app.registerExtension({
   name: 'WorkUtils.Common',
   async init(app) {
     logger.info('导入脚本、样式')
-    const script = document.createElement('script')
-    script.type = 'module'
-    script.src = '/extensions/work_utils/index.js'
-    document.head.appendChild(script)
-
-    const link = document.createElement('link')
-    link.type = 'text/css'
-    link.rel = 'stylesheet'
-    link.href = '/extensions/work_utils/assets/index.css'
-    document.head.appendChild(link)
+    Utils.importJS({ src: '/extensions/work_utils/index.js', type: 'module' })
+    Utils.importCSS('/extensions/work_utils/assets/index.css')
 
     logger.info('导入monaco')
-    // importMonaco()
+    _m.load()
   },
   async setup(app) {
     logger.info('设置颜色')
@@ -325,7 +489,7 @@ app.registerExtension({
     nodeType.prototype.onAdded = function (graph) {
       const preview = new NodeHelper.Preview(this)
       this.setSize([420, 300])
-      globalThis.createTable(`#${preview.id}`)
+      _web.table(`#${preview.id}`)
       logger.debug('render', this, preview.widget)
     }
 
@@ -334,7 +498,6 @@ app.registerExtension({
       onEx?.apply(this, arguments)
       logger.info('data', data)
       logger.info('node', this)
-      // todo: 更新ui界面
     }
   },
 })
@@ -346,25 +509,160 @@ app.registerExtension({
     if (nodeData.name !== 'JsonPreview') {
       return
     }
-    nodeType.prototype.onAdded = function (graph) {
+    nodeType.prototype.myData = {}
+    nodeType.prototype.onAdded = async function (graph) {
       const preview = new NodeHelper.Preview(this)
-      this.setSize([420, 300])
-      logger.debug('json_preview, render', this, preview.widget)
-      // const editor = monaco.editor.create(preview.$el, {
-      //   value: '{\n\t"dependencies": {\n\t\t\n\t}\n}\n',
-      //   language: 'json',
-      //   theme: 'vs-dark',
-      // })
+      this.setSize([300, 250])
+      await _m.ready
+      const editor = monaco.editor.create(preview.$el, {
+        language: 'json',
+        minimap: { enabled: false },
+        scrollbar: { horizontal: 'hidden' },
+      })
+      this.myData = {
+        preview,
+        editor,
+      }
     }
     const onEx = nodeType.prototype.onExecuted
     nodeType.prototype.onExecuted = function (result) {
       onEx?.apply(this, arguments)
       const str = result?.data?.[0]
       const data = Utils.getJson(str)
-      const id = NodeHelper.getPreviewId(this)
-      logger.info('json_preview id', id)
-      logger.info('json_preview data', data)
-      // todo: 更新ui界面
+      const { editor } = this.myData
+      editor?.getModel()?.setValue(JSON.stringify(data, null, 2))
+    }
+
+    const onResize = nodeType.prototype.onResize
+    nodeType.prototype.onResize = function (size) {
+      onResize?.apply(this, arguments)
+      const { editor } = this.myData
+      editor?.layout()
+    }
+  },
+})
+
+// text preview
+app.registerExtension({
+  name: 'WorkUtils.TextPreview',
+  async beforeRegisterNodeDef(nodeType, nodeData, app) {
+    if (nodeData.name !== 'TextPreview') {
+      return
+    }
+    // 全局弹窗挂载点
+    const dialogEle = document.createElement('div')
+    dialogEle.id = Utils.genID()
+    document.body.append(dialogEle)
+    let dialog
+    setTimeout(async () => {
+      dialog = await _web.textPickDialog(`#${dialogEle.id}`, {
+        onSave({ name, matchType, context } = {}) {
+          const { editor, jsonEditor } = context || {}
+          if (!name || !matchType || !editor || !jsonEditor) {
+            logger.warn('name or matchType or editor or jsonEditor is required')
+            return
+          }
+          const selection = editor.getSelection()
+          const text = editor.getModel().getValueInRange(selection)
+          let json = jsonEditor.getModel().getValue() || '{}'
+          try {
+            json = JSON.parse(json)
+          } catch (error) {
+            json = {}
+            logger.warn('json is invalid')
+            // json解失败可能用户正在编辑
+            return
+          }
+          if (!json[name]) {
+            json[name] = {}
+          }
+          json[name][matchType.toLowerCase()] = text.replace(/([\{\}\[\]\(\)])/g, '\\$1')
+          jsonEditor.getModel().setValue(JSON.stringify(json, null, 2))
+        },
+      })
+    }, 200)
+
+    nodeType.prototype.myData = {}
+    const onAdded = nodeType.prototype.onAdded
+    nodeType.prototype.onAdded = async function (graph) {
+      const preview = new NodeHelper.SplitPreview(this, { ratio: [0.65] })
+      this.setSize([300, 250])
+      await _m.ready
+      const editor = monaco.editor.create(preview.$elLeft, {
+        language: 'workutils-text',
+        readOnly: true,
+      })
+      const jsonEditor = monaco.editor.create(preview.$elRight, {
+        language: 'json',
+        minimap: { enabled: false },
+        scrollbar: { horizontal: 'hidden' },
+      })
+      this.myData = {
+        preview,
+        editor,
+        jsonEditor,
+        layout() {
+          editor.layout()
+          jsonEditor.layout()
+        },
+      }
+      setTimeout(this.myData.layout, 200)
+      return onAdded?.apply(this, arguments)
+    }
+
+    const onExecuted = nodeType.prototype.onExecuted
+    nodeType.prototype.onExecuted = function (result) {
+      const files = result?.data?.[0]
+      const { editor, jsonEditor } = this.myData
+      // 加载文件
+      _m.addFilesChangeCommand(editor, files)
+      // 右键挑选文本
+      const actionId = 'pick_match_item'
+      if (!editor.getAction(actionId)) {
+        editor.addAction({
+          id: 'pick_match_item',
+          label: 'Pick Match Item',
+          contextMenuGroupId: 'navigation',
+          contextMenuOrder: 1.5,
+          run: (ed) => {
+            let json = jsonEditor?.getModel().getValue() || '{}'
+            try {
+              json = JSON.parse(json)
+            } catch (error) {
+              json = {}
+            }
+            dialog?.open(this.myData, Object.keys(json))
+          },
+        })
+      }
+      return onExecuted?.apply(this, arguments)
+    }
+
+    const onResize = nodeType.prototype.onResize
+    nodeType.prototype.onResize = function (size) {
+      this.myData?.layout?.()
+      return onResize?.apply(this, arguments)
+    }
+
+    const getExtraMenuOptions = nodeType.prototype.getExtraMenuOptions
+    nodeType.prototype.getExtraMenuOptions = function (_, options) {
+      options.push({
+        content: this.myData.fullScreen ? 'Restore' : 'Zoom',
+        callback: () => {
+          this.myData.fullScreen = !this.myData.fullScreen
+          if (this.myData.fullScreen) {
+            this.myData.lastSize = this.size
+            this.myData.lastPos = this.pos
+            this.setSize([1000, 750])
+            this.pos = [200, 50]
+          } else {
+            this.setSize(this.myData.lastSize)
+            this.pos = this.myData.lastPos
+          }
+          setTimeout(() => this.myData?.layout?.(), 200)
+        },
+      })
+      return getExtraMenuOptions?.apply(this, arguments)
     }
   },
 })
